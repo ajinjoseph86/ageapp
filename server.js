@@ -216,6 +216,9 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
     if (!Number.isFinite(targetAge) || targetAge < 0 || targetAge > 120) {
       return res.status(400).json({ error: 'Target age must be between 0 and 120.' });
     }
+    if (!sceneDescription.trim()) {
+      return res.status(400).json({ error: 'Scene/clothing description is required.' });
+    }
 
     // ---- budget check BEFORE spending anything ----
     const estimatedCost = COST_PER_IMAGE_USD; // 1 output image per generation

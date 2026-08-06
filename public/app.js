@@ -160,6 +160,11 @@ els.generateBtn.addEventListener('click', async () => {
     return;
   }
 
+  if (!els.sceneDescription.value.trim()) {
+    showError('Add a scene/clothing description.');
+    return;
+  }
+
   const formData = new FormData();
   photos.forEach((file) => formData.append('photos', file));
   formData.append('currentAge', String(currentAge));
