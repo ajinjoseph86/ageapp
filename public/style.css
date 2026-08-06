@@ -327,6 +327,27 @@ body {
   object-fit: contain;
 }
 
+.watermark-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  align-items: center;
+  justify-items: center;
+  pointer-events: none;
+  transform: rotate(-30deg) scale(1.3);
+}
+
+.watermark-overlay span {
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
 .preview-loading {
   position: absolute;
   inset: 0;

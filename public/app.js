@@ -12,11 +12,11 @@ const els = {
   aspectRatio: document.getElementById('aspect-ratio'),
   generateBtn: document.getElementById('generate-btn'),
   generateBtnText: document.getElementById('generate-btn-text'),
-  costBadge: document.getElementById('cost-badge'),
   errorText: document.getElementById('error-text'),
   previewFrame: document.getElementById('preview-frame'),
   previewPlaceholder: document.getElementById('preview-placeholder'),
   previewImage: document.getElementById('preview-image'),
+  watermarkOverlay: document.getElementById('watermark-overlay'),
   previewLoading: document.getElementById('preview-loading'),
   downloadBtn: document.getElementById('download-btn'),
   gallery: document.getElementById('gallery'),
@@ -91,7 +91,6 @@ async function refreshBudget() {
     const data = await res.json();
     els.budgetText.textContent = `$${data.remainingUsd.toFixed(2)} left of $${data.dailyBudgetUsd.toFixed(2)} today`;
     els.budgetPill.classList.toggle('low', data.remainingUsd < data.costPerGenerationUsd);
-    els.costBadge.textContent = `~$${data.costPerGenerationUsd.toFixed(3)}`;
     return data;
   } catch (err) {
     els.budgetText.textContent = 'Budget unavailable';
@@ -181,6 +180,7 @@ els.generateBtn.addEventListener('click', async () => {
 
     els.previewImage.src = `${data.resultUrl}?t=${Date.now()}`;
     els.previewImage.classList.remove('hidden');
+    els.watermarkOverlay.classList.remove('hidden');
     els.downloadBtn.href = data.resultUrl;
     els.downloadBtn.download = `age-${targetAge}-${Date.now()}.png`;
     els.downloadBtn.classList.remove('hidden');
@@ -192,6 +192,7 @@ els.generateBtn.addEventListener('click', async () => {
     showError(err.message || 'Something went wrong.');
     if (els.previewImage.classList.contains('hidden')) {
       els.previewPlaceholder.classList.remove('hidden');
+      els.watermarkOverlay.classList.add('hidden');
     }
   } finally {
     setLoading(false);
