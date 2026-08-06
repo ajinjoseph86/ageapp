@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Age Transform</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">&#9679;</span>
+        <div>
+          <h1>Age Transform</h1>
+          <p>See yourself at any age. Upload a photo and travel through time.</p>
+        </div>
+      </div>
+      <div class="budget" id="budget-pill" title="fal.ai daily budget">
+        <span class="dot"></span>
+        <span id="budget-text">Loading budget…</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel controls">
+        <div class="field-group">
+          <h2>Your photos</h2>
+          <p class="hint">Upload 1–3 clear face photos. If you add a side or full-body shot too, results are usually better.</p>
+          <div class="photo-slots" id="photo-slots">
+            <label class="photo-slot" data-index="0">
+              <input type="file" accept="image/*" class="photo-input" />
+              <span class="plus">+</span>
+              <span class="slot-label">Photo 1</span>
+            </label>
+            <label class="photo-slot" data-index="1">
+              <input type="file" accept="image/*" class="photo-input" />
+              <span class="plus">+</span>
+              <span class="slot-label">Photo 2</span>
+            </label>
+            <label class="photo-slot" data-index="2">
+              <input type="file" accept="image/*" class="photo-input" />
+              <span class="plus">+</span>
+              <span class="slot-label">Photo 3</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h2>Your current age</h2>
+          <input type="number" id="current-age" min="0" max="120" value="25" class="text-input" />
+        </div>
+
+        <div class="field-group">
+          <h2>Scene description <span class="optional">optional</span></h2>
+          <textarea id="scene-description" class="text-input" rows="2" placeholder="e.g. walking down a sunlit street, sitting in a cozy cafe"></textarea>
+        </div>
+
+        <div class="field-group">
+          <div class="row-between">
+            <h2>Travel to age</h2>
+            <span class="age-readout" id="age-readout">30</span>
+          </div>
+          <input type="range" id="age-slider" min="0" max="100" value="30" class="slider" />
+          <div class="presets" id="age-presets">
+            <button type="button" data-age="5">5</button>
+            <button type="button" data-age="18">18</button>
+            <button type="button" data-age="30">30</button>
+            <button type="button" data-age="45">45</button>
+            <button type="button" data-age="60">60</button>
+            <button type="button" data-age="75">75</button>
+            <button type="button" data-age="90">90</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <h2>Output settings</h2>
+          <label class="small-label">Aspect ratio</label>
+          <select id="aspect-ratio" class="text-input">
+            <option value="auto">Auto (match photo)</option>
+            <option value="1:1">1:1 Square</option>
+            <option value="3:4">3:4 Portrait</option>
+            <option value="4:5">4:5 Portrait</option>
+            <option value="9:16">9:16 Portrait</option>
+            <option value="4:3">4:3 Landscape</option>
+            <option value="16:9">16:9 Landscape</option>
+          </select>
+        </div>
+
+        <button id="generate-btn" class="generate-btn">
+          <span id="generate-btn-text">Generate</span>
+          <span class="cost-badge" id="cost-badge">~$0.039</span>
+        </button>
+        <p class="error-text" id="error-text"></p>
+      </section>
+
+      <section class="panel preview">
+        <div class="row-between">
+          <h2>Preview</h2>
+          <a id="download-btn" class="download-btn hidden" href="#" download="age-transform.png">&#8681; Download</a>
+        </div>
+        <div class="preview-frame" id="preview-frame">
+          <div class="preview-placeholder" id="preview-placeholder">
+            <span class="preview-icon">&#128247;</span>
+            <p>Your portrait will appear here</p>
+          </div>
+          <img id="preview-image" class="preview-image hidden" alt="Age-transformed result" />
+          <div class="preview-loading hidden" id="preview-loading">
+            <div class="spinner"></div>
+            <p>Generating…</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section class="gallery-section">
+      <div class="row-between">
+        <h2>Your age transforms</h2>
+      </div>
+      <div class="gallery" id="gallery"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
