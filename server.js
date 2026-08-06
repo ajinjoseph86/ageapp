@@ -17,10 +17,10 @@ const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
 const COST_PER_IMAGE_USD = 0.039;
 const FAL_MODEL = 'fal-ai/nano-banana/edit';
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
-const GENERATED_DIR = path.join(__dirname, 'public', 'generated');
+const GENERATED_DIR = process.env.GENERATED_DIR || path.join(__dirname, 'public', 'generated');
 
 for (const dir of [DATA_DIR, GENERATED_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -28,6 +28,7 @@ for (const dir of [DATA_DIR, GENERATED_DIR]) {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/generated', express.static(GENERATED_DIR));
 
 const upload = multer({
   storage: multer.memoryStorage(),
