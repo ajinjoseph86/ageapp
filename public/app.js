@@ -137,7 +137,7 @@ function updateGenerateEnabled() {
 
 function setLoading(isLoading) {
   els.generateBtn.disabled = isLoading || !state.photos.some(Boolean);
-  els.generateBtnText.textContent = isLoading ? 'Generating…' : 'Generate';
+  els.generateBtnText.textContent = isLoading ? 'Timetravelling…' : 'Generate';
   els.previewLoading.classList.toggle('hidden', !isLoading);
 }
 
