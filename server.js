@@ -13,9 +13,21 @@ const PORT = process.env.PORT || 3000;
 const FAL_KEY = process.env.FAL_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
 
-// Nano Banana edit ($/image). See https://fal.ai/models/fal-ai/nano-banana/edit
-const COST_PER_IMAGE_USD = 0.039;
-const FAL_MODEL = 'fal-ai/nano-banana/edit';
+// GPT Image 2 edit, low quality ($/image, worst-case for non-square sizes).
+// See https://fal.ai/models/fal-ai/gpt-image-2/edit
+const COST_PER_IMAGE_USD = 0.013;
+const FAL_MODEL = 'openai/gpt-image-2/edit';
+const IMAGE_QUALITY = 'low';
+
+const ASPECT_TO_IMAGE_SIZE = {
+  auto: 'auto',
+  '1:1': 'square_hd',
+  '3:4': 'portrait_4_3',
+  '4:5': 'portrait_4_3',
+  '9:16': 'portrait_16_9',
+  '4:3': 'landscape_4_3',
+  '16:9': 'landscape_16_9',
+};
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
@@ -27,6 +39,29 @@ for (const dir of [DATA_DIR, GENERATED_DIR]) {
 }
 
 app.use(express.json());
+
+// ---------- per-visitor client id (so each browser only sees its own gallery) ----------
+
+const CLIENT_COOKIE = 'ageapp_client_id';
+
+function getClientId(req, res) {
+  const cookies = req.headers.cookie || '';
+  const match = cookies.match(new RegExp(`${CLIENT_COOKIE}=([^;]+)`));
+  if (match) return match[1];
+
+  const id = uuidv4();
+  res.setHeader(
+    'Set-Cookie',
+    `${CLIENT_COOKIE}=${id}; Path=/; Max-Age=${60 * 60 * 24 * 365}; HttpOnly; SameSite=Lax`
+  );
+  return id;
+}
+
+app.use((req, res, next) => {
+  req.clientId = getClientId(req, res);
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/generated', express.static(GENERATED_DIR));
 
@@ -156,7 +191,7 @@ app.get('/api/budget', async (req, res) => {
 
 app.get('/api/history', async (req, res) => {
   const history = await readJson(HISTORY_FILE, []);
-  res.json(history);
+  res.json(history.filter((entry) => entry.clientId === req.clientId));
 });
 
 app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
@@ -210,7 +245,8 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
       prompt,
       image_urls: imageDataUris,
       num_images: 1,
-      aspect_ratio: aspectRatio,
+      image_size: ASPECT_TO_IMAGE_SIZE[aspectRatio] || 'auto',
+      quality: IMAGE_QUALITY,
       output_format: 'png',
     });
 
@@ -229,6 +265,7 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
 
     const entry = {
       id,
+      clientId: req.clientId,
       createdAt: new Date().toISOString(),
       currentAge,
       targetAge,
