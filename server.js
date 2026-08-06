@@ -12,6 +12,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FAL_KEY = process.env.FAL_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
+const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '3', 10);
 
 // GPT Image 2 edit, low quality ($/image, worst-case for non-square sizes).
 // See https://fal.ai/models/fal-ai/gpt-image-2/edit
@@ -218,6 +219,15 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
     }
     if (!sceneDescription.trim()) {
       return res.status(400).json({ error: 'Scene/clothing description is required.' });
+    }
+
+    // ---- per-visitor generation cap ----
+    const history = await readJson(HISTORY_FILE, []);
+    const clientGenerationCount = history.filter((entry) => entry.clientId === req.clientId).length;
+    if (clientGenerationCount >= MAX_GENERATIONS_PER_CLIENT) {
+      return res.status(429).json({
+        error: `You've reached the limit of ${MAX_GENERATIONS_PER_CLIENT} generations for now.`,
+      });
     }
 
     // ---- budget check BEFORE spending anything ----
