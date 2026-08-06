@@ -171,6 +171,12 @@ function buildPrompt({ currentAge, targetAge, sceneDescription }) {
     `Preserve their exact identity, facial structure, ethnicity, and gender — do not change who they are, ` +
     `only adjust age-related features such as skin texture, wrinkles, hair color/thickness/hairline, ` +
     `and posture appropriate for age ${targetAge}. Keep it photorealistic with natural lighting.`;
+  if (targetAge < currentAge) {
+    prompt +=
+      ` If the person is balding or has thinning hair in the reference photo(s), give them a fuller, ` +
+      `thicker head of hair appropriate for a ${targetAge}-year-old, since hair loss is age-related and ` +
+      `should be reversed when making someone look younger.`;
+  }
   if (sceneDescription && sceneDescription.trim()) {
     prompt += ` Scene/setting: ${sceneDescription.trim()}.`;
   }
