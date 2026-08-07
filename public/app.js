@@ -112,7 +112,7 @@ function renderGallery(history) {
     item.innerHTML = `
       <img src="${entry.resultUrl}" alt="Age ${entry.targetAge}" />
       <span class="tag">Age ${entry.targetAge}</span>
-      <button class="gallery-download" data-image-id="${entry.id}" title="Pay $1.99 to download highres image">&#8681;</button>
+      <button class="gallery-download" data-image-id="${entry.id}" title="Pay $3.00 to download highres image">&#8681;</button>
     `;
     els.gallery.appendChild(item);
   });

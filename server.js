@@ -14,7 +14,7 @@ const FAL_KEY = process.env.FAL_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
 const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '5', 10);
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-const DOWNLOAD_PRICE_USD = parseFloat(process.env.DOWNLOAD_PRICE_USD || '1.99');
+const DOWNLOAD_PRICE_USD = parseFloat(process.env.DOWNLOAD_PRICE_USD || '3.00');
 const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
 
 // GPT Image 2 edit, low quality ($/image, worst-case for non-square sizes).
