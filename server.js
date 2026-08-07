@@ -12,7 +12,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FAL_KEY = process.env.FAL_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
-const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '3', 10);
+const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '5', 10);
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const DOWNLOAD_PRICE_USD = parseFloat(process.env.DOWNLOAD_PRICE_USD || '1.99');
+const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
 
 // GPT Image 2 edit, low quality ($/image, worst-case for non-square sizes).
 // See https://fal.ai/models/fal-ai/gpt-image-2/edit
@@ -33,6 +36,7 @@ const ASPECT_TO_IMAGE_SIZE = {
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const PAID_FILE = path.join(DATA_DIR, 'paid.json');
 const GENERATED_DIR = process.env.GENERATED_DIR || path.join(__dirname, 'public', 'generated');
 
 for (const dir of [DATA_DIR, GENERATED_DIR]) {
@@ -110,6 +114,20 @@ async function appendHistory(entry) {
   history.unshift(entry);
   await writeJson(HISTORY_FILE, history.slice(0, 200)); // keep last 200
   return history;
+}
+
+// ---------- paid downloads ----------
+
+async function isPaid(imageId, clientId) {
+  const paid = await readJson(PAID_FILE, []);
+  return paid.some((p) => p.imageId === imageId && p.clientId === clientId);
+}
+
+async function markPaid({ imageId, clientId, sessionId }) {
+  const paid = await readJson(PAID_FILE, []);
+  if (paid.some((p) => p.sessionId === sessionId)) return; // already recorded
+  paid.push({ imageId, clientId, sessionId, paidAt: new Date().toISOString() });
+  await writeJson(PAID_FILE, paid);
 }
 
 // ---------- fal.ai helpers ----------
@@ -201,6 +219,83 @@ app.get('/api/history', async (req, res) => {
   res.json(history.filter((entry) => entry.clientId === req.clientId));
 });
 
+// ---------- paywall ----------
+
+app.post('/api/checkout', async (req, res) => {
+  if (!stripe) {
+    return res.status(500).json({ error: 'Server is missing STRIPE_SECRET_KEY. Add it to .env and restart.' });
+  }
+
+  const { imageId } = req.body;
+  if (!imageId) {
+    return res.status(400).json({ error: 'imageId is required.' });
+  }
+
+  const history = await readJson(HISTORY_FILE, []);
+  const entry = history.find((h) => h.id === imageId && h.clientId === req.clientId);
+  if (!entry) {
+    return res.status(404).json({ error: 'Image not found for this session.' });
+  }
+
+  if (await isPaid(imageId, req.clientId)) {
+    return res.json({ alreadyPaid: true });
+  }
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    line_items: [
+      {
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(DOWNLOAD_PRICE_USD * 100),
+          product_data: { name: 'Age Transform — HD Download' },
+        },
+        quantity: 1,
+      },
+    ],
+    metadata: { imageId, clientId: req.clientId },
+    success_url: `${origin}/?paid_image=${imageId}&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/`,
+  });
+
+  res.json({ url: session.url });
+});
+
+app.get('/api/verify-payment', async (req, res) => {
+  if (!stripe) {
+    return res.status(500).json({ error: 'Server is missing STRIPE_SECRET_KEY.' });
+  }
+  const { session_id: sessionId } = req.query;
+  if (!sessionId) {
+    return res.status(400).json({ error: 'session_id is required.' });
+  }
+
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  if (session.payment_status !== 'paid') {
+    return res.status(402).json({ paid: false });
+  }
+  if (session.metadata?.clientId !== req.clientId) {
+    return res.status(403).json({ error: 'Session does not belong to this browser.' });
+  }
+
+  await markPaid({ imageId: session.metadata.imageId, clientId: req.clientId, sessionId });
+  res.json({ paid: true, imageId: session.metadata.imageId });
+});
+
+app.get('/api/download/:imageId', async (req, res) => {
+  const { imageId } = req.params;
+  const history = await readJson(HISTORY_FILE, []);
+  const entry = history.find((h) => h.id === imageId && h.clientId === req.clientId);
+  if (!entry) {
+    return res.status(404).json({ error: 'Image not found.' });
+  }
+  if (!(await isPaid(imageId, req.clientId))) {
+    return res.status(402).json({ error: 'Payment required.' });
+  }
+  res.download(path.join(GENERATED_DIR, `${imageId}.png`), `age-transform-${imageId.slice(0, 8)}.png`);
+});
+
 app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
   try {
     if (!FAL_KEY) {
@@ -227,13 +322,17 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
       return res.status(400).json({ error: 'Scene/clothing description is required.' });
     }
 
-    // ---- per-visitor generation cap ----
+    // ---- per-visitor generation cap: after the free limit, require at least 1 paid download ----
     const history = await readJson(HISTORY_FILE, []);
     const clientGenerationCount = history.filter((entry) => entry.clientId === req.clientId).length;
     if (clientGenerationCount >= MAX_GENERATIONS_PER_CLIENT) {
-      return res.status(429).json({
-        error: `You've reached the limit of ${MAX_GENERATIONS_PER_CLIENT} generations for now.`,
-      });
+      const paid = await readJson(PAID_FILE, []);
+      const hasPaid = paid.some((p) => p.clientId === req.clientId);
+      if (!hasPaid) {
+        return res.status(402).json({
+          error: `You've used your ${MAX_GENERATIONS_PER_CLIENT} free generations. Pay to download an image to keep generating.`,
+        });
+      }
     }
 
     // ---- budget check BEFORE spending anything ----
@@ -296,6 +395,7 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
 
     res.json({
       success: true,
+      id: entry.id,
       resultUrl: entry.resultUrl,
       costUsd: estimatedCost,
       spentTodayUsd: Number(newTotal.toFixed(4)),

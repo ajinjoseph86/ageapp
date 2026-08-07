@@ -1,5 +1,6 @@
 const state = {
   photos: [null, null, null], // File objects
+  currentImageId: null,
 };
 
 const els = {
@@ -108,11 +109,10 @@ function renderGallery(history) {
   history.forEach((entry) => {
     const item = document.createElement('div');
     item.className = 'gallery-item';
-    const filename = `age-${entry.targetAge}-${entry.id ? entry.id.slice(0, 8) : Date.now()}.png`;
     item.innerHTML = `
       <img src="${entry.resultUrl}" alt="Age ${entry.targetAge}" />
       <span class="tag">Age ${entry.targetAge}</span>
-      <a class="gallery-download" href="${entry.resultUrl}" download="${filename}" title="Download">&#8681;</a>
+      <button class="gallery-download" data-image-id="${entry.id}" title="Pay $1.99 to download highres image">&#8681;</button>
     `;
     els.gallery.appendChild(item);
   });
@@ -125,6 +125,85 @@ async function refreshHistory() {
     renderGallery(history);
   } catch (err) {
     renderGallery([]);
+  }
+}
+
+els.gallery.addEventListener('click', (e) => {
+  const btn = e.target.closest('.gallery-download');
+  if (btn) startCheckout(btn.dataset.imageId);
+});
+
+// ---------- paywall ----------
+
+function triggerDownload(imageId) {
+  const a = document.createElement('a');
+  a.href = `/api/download/${imageId}`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function restorePaidPreview(imageId) {
+  try {
+    const res = await fetch('/api/history');
+    const history = await res.json();
+    const entry = history.find((h) => h.id === imageId);
+    if (!entry) return;
+
+    els.previewPlaceholder.classList.add('hidden');
+    els.previewImage.src = entry.resultUrl;
+    els.previewImage.classList.remove('hidden');
+    els.watermarkOverlay.classList.remove('hidden');
+    els.downloadBtn.classList.remove('hidden');
+    state.currentImageId = entry.id;
+  } catch (err) {
+    // non-fatal: preview just won't be restored
+  }
+}
+
+async function startCheckout(imageId) {
+  if (!imageId) return;
+  showError('');
+  try {
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not start checkout.');
+    }
+    if (data.alreadyPaid) {
+      triggerDownload(imageId);
+      return;
+    }
+    window.location.href = data.url;
+  } catch (err) {
+    showError(err.message || 'Could not start checkout.');
+  }
+}
+
+async function handlePaymentReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const paidImage = params.get('paid_image');
+  const sessionId = params.get('session_id');
+  if (!paidImage || !sessionId) return;
+
+  window.history.replaceState({}, '', window.location.pathname);
+
+  try {
+    const res = await fetch(`/api/verify-payment?session_id=${encodeURIComponent(sessionId)}`);
+    const data = await res.json();
+    if (res.ok && data.paid) {
+      await restorePaidPreview(paidImage);
+      triggerDownload(paidImage);
+    } else {
+      showError('Payment could not be verified.');
+    }
+  } catch (err) {
+    showError('Payment could not be verified.');
   }
 }
 
@@ -186,8 +265,7 @@ els.generateBtn.addEventListener('click', async () => {
     els.previewImage.src = `${data.resultUrl}?t=${Date.now()}`;
     els.previewImage.classList.remove('hidden');
     els.watermarkOverlay.classList.remove('hidden');
-    els.downloadBtn.href = data.resultUrl;
-    els.downloadBtn.download = `age-${targetAge}-${Date.now()}.png`;
+    state.currentImageId = data.id;
     els.downloadBtn.classList.remove('hidden');
     els.budgetText.textContent = `$${data.remainingTodayUsd.toFixed(2)} left of today's budget`;
     els.budgetPill.classList.toggle('low', data.remainingTodayUsd < data.costUsd);
@@ -204,8 +282,11 @@ els.generateBtn.addEventListener('click', async () => {
   }
 });
 
+els.downloadBtn.addEventListener('click', () => startCheckout(state.currentImageId));
+
 // ---------- init ----------
 
 updateGenerateEnabled();
 refreshBudget();
 refreshHistory();
+handlePaymentReturn();

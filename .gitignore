@@ -1,5 +1,6 @@
 node_modules/
 .env
+paywall-version/
 data/*.json
 public/generated/*
 public/uploads/*
