@@ -111,6 +111,11 @@ function renderGallery(history) {
     item.className = 'gallery-item';
     item.innerHTML = `
       <img src="${entry.resultUrl}" alt="Age ${entry.targetAge}" />
+      <div class="watermark-overlay gallery-watermark">
+        <span>REPUBLIC POLYTECHNIC</span><span>REPUBLIC POLYTECHNIC</span><span>REPUBLIC POLYTECHNIC</span>
+        <span>REPUBLIC POLYTECHNIC</span><span>REPUBLIC POLYTECHNIC</span><span>REPUBLIC POLYTECHNIC</span>
+        <span>REPUBLIC POLYTECHNIC</span><span>REPUBLIC POLYTECHNIC</span><span>REPUBLIC POLYTECHNIC</span>
+      </div>
       <span class="tag">Age ${entry.targetAge}</span>
       <button class="gallery-download" data-image-id="${entry.id}" title="Pay $2.00 to download highres image">&#8681;</button>
     `;
