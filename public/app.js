@@ -1,7 +1,3 @@
-// Change this one line to rebrand the on-screen watermark.
-const WATERMARK_TEXT = 'MULTIVERSEMATRIX';
-const WATERMARK_TILES = 220;
-
 const state = {
   photos: [null, null, null], // File objects
   currentImageId: null,
@@ -9,7 +5,6 @@ const state = {
 
 const els = {
   slots: document.querySelectorAll('.photo-slot'),
-  currentAge: document.getElementById('current-age'),
   sceneDescription: document.getElementById('scene-description'),
   ageSlider: document.getElementById('age-slider'),
   ageReadout: document.getElementById('age-readout'),
@@ -21,21 +16,12 @@ const els = {
   previewFrame: document.getElementById('preview-frame'),
   previewPlaceholder: document.getElementById('preview-placeholder'),
   previewImage: document.getElementById('preview-image'),
-  watermarkOverlay: document.getElementById('watermark-overlay'),
   previewLoading: document.getElementById('preview-loading'),
   downloadBtn: document.getElementById('download-btn'),
   gallery: document.getElementById('gallery'),
   budgetPill: document.getElementById('budget-pill'),
   budgetText: document.getElementById('budget-text'),
 };
-
-// ---------- watermark ----------
-
-function watermarkMarkup() {
-  return `<span>${WATERMARK_TEXT}</span>`.repeat(WATERMARK_TILES);
-}
-
-els.watermarkOverlay.innerHTML = watermarkMarkup();
 
 // ---------- photo slots ----------
 
@@ -123,7 +109,6 @@ function renderGallery(history) {
     item.className = 'gallery-item';
     item.innerHTML = `
       <img src="${entry.resultUrl}" alt="Age ${entry.targetAge}" />
-      <div class="watermark-overlay gallery-watermark">${watermarkMarkup()}</div>
       <span class="tag">Age ${entry.targetAge}</span>
       <button class="gallery-download" data-image-id="${entry.id}" title="Pay $2.00 to download highres image">&#8681;</button>
     `;
@@ -167,7 +152,6 @@ async function restorePaidPreview(imageId) {
     els.previewPlaceholder.classList.add('hidden');
     els.previewImage.src = entry.resultUrl;
     els.previewImage.classList.remove('hidden');
-    els.watermarkOverlay.classList.remove('hidden');
     els.downloadBtn.classList.remove('hidden');
     state.currentImageId = entry.id;
   } catch (err) {
@@ -245,12 +229,7 @@ els.generateBtn.addEventListener('click', async () => {
     return;
   }
 
-  const currentAge = parseInt(els.currentAge.value, 10);
   const targetAge = parseInt(els.ageSlider.value, 10);
-  if (!Number.isFinite(currentAge) || currentAge < 0 || currentAge > 120) {
-    showError('Enter a valid current age.');
-    return;
-  }
 
   if (!els.sceneDescription.value.trim()) {
     showError('Add a scene/clothing description.');
@@ -259,7 +238,6 @@ els.generateBtn.addEventListener('click', async () => {
 
   const formData = new FormData();
   photos.forEach((file) => formData.append('photos', file));
-  formData.append('currentAge', String(currentAge));
   formData.append('targetAge', String(targetAge));
   formData.append('sceneDescription', els.sceneDescription.value || '');
   formData.append('aspectRatio', els.aspectRatio.value);
@@ -277,7 +255,6 @@ els.generateBtn.addEventListener('click', async () => {
 
     els.previewImage.src = `${data.resultUrl}?t=${Date.now()}`;
     els.previewImage.classList.remove('hidden');
-    els.watermarkOverlay.classList.remove('hidden');
     state.currentImageId = data.id;
     els.downloadBtn.classList.remove('hidden');
     els.budgetText.textContent = `$${data.remainingTodayUsd.toFixed(2)} left of today's budget`;
@@ -288,7 +265,6 @@ els.generateBtn.addEventListener('click', async () => {
     showError(err.message || 'Something went wrong.');
     if (els.previewImage.classList.contains('hidden')) {
       els.previewPlaceholder.classList.remove('hidden');
-      els.watermarkOverlay.classList.add('hidden');
     }
   } finally {
     setLoading(false);

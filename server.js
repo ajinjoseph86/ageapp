@@ -38,8 +38,13 @@ const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const PAID_FILE = path.join(DATA_DIR, 'paid.json');
 const GENERATED_DIR = process.env.GENERATED_DIR || path.join(__dirname, 'public', 'generated');
+// Real, unwatermarked output lives here — this folder is NEVER served statically.
+// Only the authenticated, paid /api/download route can read from it.
+const PRIVATE_DIR = process.env.PRIVATE_DIR || path.join(DATA_DIR, 'private');
 
-for (const dir of [DATA_DIR, GENERATED_DIR]) {
+const WATERMARK_TEXT = 'MULTIVERSEMATRIX';
+
+for (const dir of [DATA_DIR, GENERATED_DIR, PRIVATE_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
@@ -172,29 +177,58 @@ async function falPollResult(statusUrl, responseUrl, { timeoutMs = 90000, interv
   throw new Error('fal generation timed out');
 }
 
-async function downloadToFile(url, destPath) {
+async function downloadToBuffer(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`failed to download result image (${res.status})`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await fsp.writeFile(destPath, buf);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// Tiles the watermark text as a real, rendered SVG pattern sized to the
+// image's own dimensions, then composites it onto the pixels — this can't
+// be stripped by right-click-save the way a CSS overlay can, and density
+// stays correct no matter the image's aspect ratio (portrait/landscape/etc).
+function watermarkSvg(width, height, text) {
+  return Buffer.from(`
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="wm" width="240" height="120" patternUnits="userSpaceOnUse" patternTransform="rotate(-30)">
+          <text x="0" y="70" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800"
+                fill="rgba(255,255,255,0.32)" stroke="rgba(0,0,0,0.25)" stroke-width="0.5">${text}</text>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#wm)" />
+    </svg>
+  `);
+}
+
+// Saves the real output privately (never publicly servable), and a
+// watermarked, slightly compressed copy publicly for the on-screen preview.
+async function saveOriginalAndPreview(buffer, id) {
+  const originalFile = `${id}.png`;
+  await fsp.writeFile(path.join(PRIVATE_DIR, originalFile), buffer);
+
+  const metadata = await sharp(buffer).metadata();
+  const previewFile = `${id}-preview.jpg`;
+  await sharp(buffer)
+    .composite([{ input: watermarkSvg(metadata.width, metadata.height, WATERMARK_TEXT) }])
+    .jpeg({ quality: 82 })
+    .toFile(path.join(GENERATED_DIR, previewFile));
+
+  return { originalFile, previewFile };
 }
 
 // ---------- prompt building ----------
 
-function buildPrompt({ currentAge, targetAge, sceneDescription }) {
-  const direction = targetAge > currentAge ? 'older' : targetAge < currentAge ? 'younger' : 'the same age';
+function buildPrompt({ targetAge, sceneDescription }) {
   let prompt =
-    `Transform the person in the reference photo(s) to look ${targetAge} years old ` +
-    `(they are currently ${currentAge} years old, so make them look ${direction}). ` +
+    `Transform the person in the reference photo(s) to look exactly ${targetAge} years old, ` +
+    `based on their apparent current age in the photo(s). ` +
     `Preserve their exact identity, facial structure, ethnicity, and gender — do not change who they are, ` +
     `only adjust age-related features such as skin texture, wrinkles, hair color/thickness/hairline, ` +
-    `and posture appropriate for age ${targetAge}. Keep it photorealistic with natural lighting.`;
-  if (targetAge < currentAge) {
-    prompt +=
-      ` If the person is balding or has thinning hair in the reference photo(s), give them a fuller, ` +
-      `thicker head of hair appropriate for a ${targetAge}-year-old, since hair loss is age-related and ` +
-      `should be reversed when making someone look younger.`;
-  }
+    `and posture appropriate for age ${targetAge}. Keep it photorealistic with natural lighting. ` +
+    `If the person appears to be balding or has thinning hair in the reference photo(s) and ${targetAge} ` +
+    `is younger than their apparent current age, give them a fuller, thicker head of hair appropriate ` +
+    `for a ${targetAge}-year-old, since hair loss is age-related and should be reversed when de-aging.`;
   if (sceneDescription && sceneDescription.trim()) {
     prompt += ` Scene/setting: ${sceneDescription.trim()}.`;
   }
@@ -293,7 +327,7 @@ app.get('/api/download/:imageId', async (req, res) => {
   if (!(await isPaid(imageId, req.clientId))) {
     return res.status(402).json({ error: 'Payment required.' });
   }
-  res.download(path.join(GENERATED_DIR, `${imageId}.png`), `age-transform-${imageId.slice(0, 8)}.png`);
+  res.download(path.join(PRIVATE_DIR, `${imageId}.png`), `age-transform-${imageId.slice(0, 8)}.png`);
 });
 
 app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
@@ -307,14 +341,10 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
       return res.status(400).json({ error: 'Upload at least 1 photo (up to 3).' });
     }
 
-    const currentAge = parseInt(req.body.currentAge, 10);
     const targetAge = parseInt(req.body.targetAge, 10);
     const sceneDescription = req.body.sceneDescription || '';
     const aspectRatio = req.body.aspectRatio || 'auto';
 
-    if (!Number.isFinite(currentAge) || currentAge < 0 || currentAge > 120) {
-      return res.status(400).json({ error: 'Current age must be between 0 and 120.' });
-    }
     if (!Number.isFinite(targetAge) || targetAge < 0 || targetAge > 120) {
       return res.status(400).json({ error: 'Target age must be between 0 and 120.' });
     }
@@ -357,7 +387,7 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
       })
     );
 
-    const prompt = buildPrompt({ currentAge, targetAge, sceneDescription });
+    const prompt = buildPrompt({ targetAge, sceneDescription });
 
     const submitted = await falSubmit({
       prompt,
@@ -376,8 +406,8 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
     }
 
     const id = uuidv4();
-    const destFile = `${id}.png`;
-    await downloadToFile(outputImage.url, path.join(GENERATED_DIR, destFile));
+    const outputBuffer = await downloadToBuffer(outputImage.url);
+    const { previewFile } = await saveOriginalAndPreview(outputBuffer, id);
 
     const newTotal = await addSpend(estimatedCost);
 
@@ -385,10 +415,9 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
       id,
       clientId: req.clientId,
       createdAt: new Date().toISOString(),
-      currentAge,
       targetAge,
       sceneDescription: sceneDescription || null,
-      resultUrl: `/generated/${destFile}`,
+      resultUrl: `/generated/${previewFile}`,
       costUsd: estimatedCost,
     };
     await appendHistory(entry);
