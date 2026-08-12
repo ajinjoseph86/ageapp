@@ -12,7 +12,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FAL_KEY = process.env.FAL_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
-const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '5', 10);
+const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '8', 10);
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const DOWNLOAD_PRICE_USD = parseFloat(process.env.DOWNLOAD_PRICE_USD || '2.00');
 const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
@@ -436,9 +436,38 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
   }
 });
 
+// ---------- one-time migration: watermark + privatize images generated before this fix ----------
+// Old entries have resultUrl like /generated/{id}.png — a raw, unwatermarked file that was
+// sitting in the public folder. Move it to private storage and generate the real watermarked
+// preview in its place. Safe to run every boot: already-migrated entries (resultUrl ending in
+// -preview.jpg) are skipped.
+async function migrateLegacyImages() {
+  const history = await readJson(HISTORY_FILE, []);
+  let migrated = 0;
+  for (const entry of history) {
+    if (!entry.resultUrl || entry.resultUrl.endsWith('-preview.jpg')) continue;
+    const oldPublicPath = path.join(GENERATED_DIR, path.basename(entry.resultUrl));
+    if (!fs.existsSync(oldPublicPath)) continue;
+    try {
+      const buffer = await fsp.readFile(oldPublicPath);
+      const { previewFile } = await saveOriginalAndPreview(buffer, entry.id);
+      await fsp.unlink(oldPublicPath);
+      entry.resultUrl = `/generated/${previewFile}`;
+      migrated++;
+    } catch (err) {
+      console.error(`migration failed for ${entry.id}:`, err.message);
+    }
+  }
+  if (migrated > 0) {
+    await writeJson(HISTORY_FILE, history);
+    console.log(`Migrated ${migrated} legacy image(s) to private storage + watermarked preview.`);
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`Age Transform app running at http://localhost:${PORT}`);
   if (!FAL_KEY) {
     console.warn('WARNING: FAL_KEY is not set. Copy .env.example to .env and add your fal.ai API key.');
   }
+  migrateLegacyImages().catch((err) => console.error('migration error:', err));
 });
