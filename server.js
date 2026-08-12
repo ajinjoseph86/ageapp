@@ -192,8 +192,8 @@ function watermarkSvg(width, height, text) {
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <pattern id="wm" width="240" height="120" patternUnits="userSpaceOnUse" patternTransform="rotate(-30)">
-          <text x="0" y="70" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800"
-                fill="rgba(255,255,255,0.32)" stroke="rgba(0,0,0,0.25)" stroke-width="0.5">${text}</text>
+          <text x="0" y="70" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="900"
+                fill="rgba(255,255,255,0.42)" stroke="rgba(0,0,0,0.4)" stroke-width="1.5">${text}</text>
         </pattern>
       </defs>
       <rect width="100%" height="100%" fill="url(#wm)" />
