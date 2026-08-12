@@ -1,3 +1,7 @@
+// Change this one line to rebrand the on-screen watermark.
+const WATERMARK_TEXT = 'MULTIVERSEMATRIX';
+const WATERMARK_TILES = 220;
+
 const state = {
   photos: [null, null, null], // File objects
   currentImageId: null,
@@ -24,6 +28,14 @@ const els = {
   budgetPill: document.getElementById('budget-pill'),
   budgetText: document.getElementById('budget-text'),
 };
+
+// ---------- watermark ----------
+
+function watermarkMarkup() {
+  return `<span>${WATERMARK_TEXT}</span>`.repeat(WATERMARK_TILES);
+}
+
+els.watermarkOverlay.innerHTML = watermarkMarkup();
 
 // ---------- photo slots ----------
 
@@ -111,11 +123,7 @@ function renderGallery(history) {
     item.className = 'gallery-item';
     item.innerHTML = `
       <img src="${entry.resultUrl}" alt="Age ${entry.targetAge}" />
-      <div class="watermark-overlay gallery-watermark">
-        <span>MULTIVERSEMATRIX</span><span>MULTIVERSEMATRIX</span><span>MULTIVERSEMATRIX</span>
-        <span>MULTIVERSEMATRIX</span><span>MULTIVERSEMATRIX</span><span>MULTIVERSEMATRIX</span>
-        <span>MULTIVERSEMATRIX</span><span>MULTIVERSEMATRIX</span><span>MULTIVERSEMATRIX</span>
-      </div>
+      <div class="watermark-overlay gallery-watermark">${watermarkMarkup()}</div>
       <span class="tag">Age ${entry.targetAge}</span>
       <button class="gallery-download" data-image-id="${entry.id}" title="Pay $2.00 to download highres image">&#8681;</button>
     `;
