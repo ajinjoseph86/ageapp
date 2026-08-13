@@ -1,7 +1,7 @@
 node_modules/
 .env
 paywall-version/
-data/*.json
+data/
 public/generated/*
 public/uploads/*
 !public/generated/.gitkeep
