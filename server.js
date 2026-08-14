@@ -290,7 +290,7 @@ app.post('/api/checkout', async (req, res) => {
     ],
     metadata: { imageId, clientId: req.clientId },
     success_url: `${origin}/?paid_image=${imageId}&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/`,
+    cancel_url: `${origin}/?preview_image=${imageId}`,
   });
 
   res.json({ url: session.url });

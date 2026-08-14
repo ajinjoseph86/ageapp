@@ -186,21 +186,29 @@ async function handlePaymentReturn() {
   const params = new URLSearchParams(window.location.search);
   const paidImage = params.get('paid_image');
   const sessionId = params.get('session_id');
-  if (!paidImage || !sessionId) return;
+  const previewImage = params.get('preview_image');
 
-  window.history.replaceState({}, '', window.location.pathname);
-
-  try {
-    const res = await fetch(`/api/verify-payment?session_id=${encodeURIComponent(sessionId)}`);
-    const data = await res.json();
-    if (res.ok && data.paid) {
-      await restorePaidPreview(paidImage);
-      triggerDownload(paidImage);
-    } else {
+  if (paidImage && sessionId) {
+    window.history.replaceState({}, '', window.location.pathname);
+    try {
+      const res = await fetch(`/api/verify-payment?session_id=${encodeURIComponent(sessionId)}`);
+      const data = await res.json();
+      if (res.ok && data.paid) {
+        await restorePaidPreview(paidImage);
+        triggerDownload(paidImage);
+      } else {
+        showError('Payment could not be verified.');
+      }
+    } catch (err) {
       showError('Payment could not be verified.');
     }
-  } catch (err) {
-    showError('Payment could not be verified.');
+    return;
+  }
+
+  if (previewImage) {
+    // User cancelled checkout — just bring their preview back, no payment to verify.
+    window.history.replaceState({}, '', window.location.pathname);
+    await restorePaidPreview(previewImage);
   }
 }
 
