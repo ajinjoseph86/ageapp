@@ -17,12 +17,13 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const DOWNLOAD_PRICE_USD = parseFloat(process.env.DOWNLOAD_PRICE_USD || '2.00');
 const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
 
-// GPT Image 2 (image-to-image/edit) via kie.ai. Flat per-task credit cost regardless of
-// resolution — confirmed empirically at 6 credits/task ($1 = 200 credits -> $0.03/image).
-const COST_PER_IMAGE_USD = 0.03;
-const KIE_MODEL = 'gpt-image-2-image-to-image';
+// Nano Banana Pro (Gemini 3 Pro Image) via kie.ai — much stronger identity preservation
+// than GPT Image 2. ~24 credits/image ($1 = 200 credits -> ~$0.12/image).
+const COST_PER_IMAGE_USD = 0.12;
+const KIE_MODEL = 'nano-banana-pro';
 const KIE_ROOT = 'https://api.kie.ai';
 const KIE_API_BASE = `${KIE_ROOT}/api/v1`;
+const LLM_MODEL = 'gpt-5-6-luna';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
@@ -238,18 +239,74 @@ async function saveOriginalAndPreview(buffer, id) {
   return { originalFile, previewFile };
 }
 
+// ---------- facial feature description (identity lock) ----------
+
+// Asks a vision-capable LLM to describe the person's facial features in words.
+// GPT Image 2's edit model can drift from the reference photo's likeness, so we
+// anchor identity with an explicit text description alongside the image input.
+async function describeFacialFeatures(imageUrl) {
+  const res = await fetchWithRetry(`${KIE_ROOT}/codex/v1/responses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${KIE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: LLM_MODEL,
+      stream: false,
+      input: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text:
+                'Describe this person\'s distinct facial features and hair in one dense paragraph, ' +
+                'for use as an identity-lock reference in an image-editing prompt. Cover: ' +
+                'face shape, eye shape/color/spacing, eyebrow shape, nose shape, lip shape, ' +
+                'jawline/chin, skin tone, any distinguishing marks (moles, freckles, scars), ' +
+                'and hair (color, texture, length, parting, style). ' +
+                'Be specific and concrete. Do not mention age, clothing, or background.',
+            },
+            { type: 'input_image', image_url: imageUrl },
+          ],
+        },
+      ],
+      reasoning: { effort: 'low' },
+    }),
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(body?.error?.message || body?.msg || `kie.ai vision call failed (${res.status})`);
+  }
+  const message = (body.output || []).find((o) => o.type === 'message');
+  const textBlock = (message?.content || []).find((c) => c.type === 'output_text' && c.text);
+  return textBlock ? textBlock.text.trim() : null;
+}
+
 // ---------- prompt building ----------
 
-function buildPrompt({ targetAge, sceneDescription }) {
+function buildPrompt({ targetAge, sceneDescription, facialDescription }) {
   let prompt =
     `Transform the person in the reference photo(s) to look exactly ${targetAge} years old, ` +
     `based on their apparent current age in the photo(s). ` +
     `Preserve their exact identity, facial structure, ethnicity, and gender — do not change who they are, ` +
     `only adjust age-related features such as skin texture, wrinkles, hair color/thickness/hairline, ` +
     `and posture appropriate for age ${targetAge}. Keep it photorealistic with natural lighting. ` +
-    `If the person appears to be balding or has thinning hair in the reference photo(s) and ${targetAge} ` +
-    `is younger than their apparent current age, give them a fuller, thicker head of hair appropriate ` +
-    `for a ${targetAge}-year-old, since hair loss is age-related and should be reversed when de-aging.`;
+    `Hair density rule — apply only one direction: if the person appears balding or has thinning hair ` +
+    `in the reference photo(s) and ${targetAge} is YOUNGER than their apparent current age, give them a ` +
+    `fuller, thicker head of hair appropriate for a ${targetAge}-year-old, since hair loss is age-related ` +
+    `and should be reversed when de-aging. Conversely, if ${targetAge} is OLDER than their apparent ` +
+    `current age, never add hair density they do not already have — if they are balding or bald in the ` +
+    `reference photo(s), keep them at least as bald/balding at ${targetAge}, since hair loss progresses ` +
+    `with age and never reverses on its own. If the person has a full head of hair in the reference ` +
+    `photo(s), keep it full but add natural age-appropriate greying/thinning only if ${targetAge} is OLDER.`;
+  if (facialDescription) {
+    prompt +=
+      ` IDENTITY LOCK — this person's exact facial features and hairstyle, which must be preserved ` +
+      `precisely at the new age (only adjust hair density/balding per the age rule above, keep the ` +
+      `same hair color, texture, length, and style otherwise): ${facialDescription}`;
+  }
   if (sceneDescription && sceneDescription.trim()) {
     prompt += ` Scene/setting: ${sceneDescription.trim()}.`;
   }
@@ -412,9 +469,17 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
       })
     );
 
-    const prompt = buildPrompt({ targetAge, sceneDescription });
+    let facialDescription = null;
+    try {
+      facialDescription = await describeFacialFeatures(imageUrls[0]);
+    } catch (err) {
+      // non-fatal — fall back to image-only identity signal if the vision call fails
+      console.warn('describeFacialFeatures failed, continuing without it:', err.message);
+    }
 
-    const taskId = await kieCreateTask({ prompt, image_urls: imageUrls });
+    const prompt = buildPrompt({ targetAge, sceneDescription, facialDescription });
+
+    const taskId = await kieCreateTask({ prompt, image_input: imageUrls, output_format: 'jpg' });
     const resultImageUrl = await kiePollResult(taskId);
 
     const id = uuidv4();
