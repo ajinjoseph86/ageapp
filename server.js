@@ -10,28 +10,19 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const FAL_KEY = process.env.FAL_KEY;
+const KIE_API_KEY = process.env.KIE_API_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
 const MAX_GENERATIONS_PER_CLIENT = parseInt(process.env.MAX_GENERATIONS_PER_CLIENT || '8', 10);
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const DOWNLOAD_PRICE_USD = parseFloat(process.env.DOWNLOAD_PRICE_USD || '2.00');
 const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
 
-// GPT Image 2 edit, low quality ($/image, worst-case for non-square sizes).
-// See https://fal.ai/models/fal-ai/gpt-image-2/edit
-const COST_PER_IMAGE_USD = 0.013;
-const FAL_MODEL = 'openai/gpt-image-2/edit';
-const IMAGE_QUALITY = 'low';
-
-const ASPECT_TO_IMAGE_SIZE = {
-  auto: 'auto',
-  '1:1': 'square_hd',
-  '3:4': 'portrait_4_3',
-  '4:5': 'portrait_4_3',
-  '9:16': 'portrait_16_9',
-  '4:3': 'landscape_4_3',
-  '16:9': 'landscape_16_9',
-};
+// GPT Image 2 (image-to-image/edit) via kie.ai. Flat per-task credit cost regardless of
+// resolution — confirmed empirically at 6 credits/task ($1 = 200 credits -> $0.03/image).
+const COST_PER_IMAGE_USD = 0.03;
+const KIE_MODEL = 'gpt-image-2-image-to-image';
+const KIE_ROOT = 'https://api.kie.ai';
+const KIE_API_BASE = `${KIE_ROOT}/api/v1`;
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
@@ -41,10 +32,13 @@ const GENERATED_DIR = process.env.GENERATED_DIR || path.join(__dirname, 'public'
 // Real, unwatermarked output lives here — this folder is NEVER served statically.
 // Only the authenticated, paid /api/download route can read from it.
 const PRIVATE_DIR = process.env.PRIVATE_DIR || path.join(DATA_DIR, 'private');
+// kie.ai needs a real fetchable URL for reference photos (data URIs are rejected) — staged
+// here briefly and deleted right after the task is submitted.
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'public', 'uploads');
 
 const WATERMARK_TEXT = 'MULTIVERSEMATRIX';
 
-for (const dir of [DATA_DIR, GENERATED_DIR, PRIVATE_DIR]) {
+for (const dir of [DATA_DIR, GENERATED_DIR, PRIVATE_DIR, UPLOADS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
@@ -74,6 +68,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/generated', express.static(GENERATED_DIR));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -135,50 +130,76 @@ async function markPaid({ imageId, clientId, sessionId }) {
   await writeJson(PAID_FILE, paid);
 }
 
-// ---------- fal.ai helpers ----------
+// ---------- kie.ai helpers ----------
 
-async function falSubmit(input) {
-  const res = await fetch(`https://queue.fal.run/${FAL_MODEL}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Key ${FAL_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  });
-  const body = await res.json();
-  if (!res.ok) {
-    throw new Error(body?.detail ? JSON.stringify(body.detail) : `fal submit failed (${res.status})`);
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+async function fetchWithRetry(url, options, { retries = 8, delayMs = 1500, maxDelayMs = 6000 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(url, options);
+      if (RETRYABLE_STATUS_CODES.has(res.status) && attempt < retries) {
+        const wait = Math.min(maxDelayMs, delayMs * 1.5 ** attempt);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        const wait = Math.min(maxDelayMs, delayMs * 1.5 ** attempt);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
   }
-  return body; // { request_id, status_url, response_url, ... }
+  throw lastErr;
 }
 
-async function falPollResult(statusUrl, responseUrl, { timeoutMs = 90000, intervalMs = 1500 } = {}) {
+async function kieCreateTask(input) {
+  const res = await fetchWithRetry(`${KIE_API_BASE}/jobs/createTask`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${KIE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model: KIE_MODEL, input }),
+  });
+  const body = await res.json();
+  if (!res.ok || body.code !== 200) {
+    throw new Error(body?.msg || `kie.ai createTask failed (${res.status})`);
+  }
+  return body.data.taskId;
+}
+
+async function kiePollResult(taskId, { timeoutMs = 5 * 60 * 1000, intervalMs = 3000 } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const statusRes = await fetch(statusUrl, {
-      headers: { Authorization: `Key ${FAL_KEY}` },
+    const res = await fetchWithRetry(`${KIE_API_BASE}/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
     });
-    const status = await statusRes.json();
-    if (status.status === 'COMPLETED') {
-      const resultRes = await fetch(responseUrl, {
-        headers: { Authorization: `Key ${FAL_KEY}` },
-      });
-      if (!resultRes.ok) {
-        throw new Error(`fal result fetch failed (${resultRes.status})`);
-      }
-      return resultRes.json();
+    const body = await res.json();
+    if (!res.ok || body.code !== 200) {
+      throw new Error(body?.msg || `kie.ai recordInfo failed (${res.status})`);
     }
-    if (status.status === 'ERROR' || status.status === 'FAILED') {
-      throw new Error(`fal generation failed: ${JSON.stringify(status)}`);
+    const { state, resultJson, failMsg } = body.data;
+    if (state === 'success') {
+      const result = JSON.parse(resultJson);
+      if (!result.resultUrls || !result.resultUrls[0]) {
+        throw new Error('kie.ai task succeeded but returned no output image.');
+      }
+      return result.resultUrls[0];
+    }
+    if (state === 'fail') {
+      throw new Error(failMsg || 'kie.ai generation failed.');
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  throw new Error('fal generation timed out');
+  throw new Error('kie.ai generation timed out.');
 }
 
 async function downloadToBuffer(url) {
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) throw new Error(`failed to download result image (${res.status})`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -331,9 +352,10 @@ app.get('/api/download/:imageId', async (req, res) => {
 });
 
 app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
+  const tempUploadPaths = [];
   try {
-    if (!FAL_KEY) {
-      return res.status(500).json({ error: 'Server is missing FAL_KEY. Add it to your .env file and restart.' });
+    if (!KIE_API_KEY) {
+      return res.status(500).json({ error: 'Server is missing KIE_API_KEY. Add it to your .env file and restart.' });
     }
 
     const files = req.files || [];
@@ -343,7 +365,6 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
 
     const targetAge = parseInt(req.body.targetAge, 10);
     const sceneDescription = req.body.sceneDescription || '';
-    const aspectRatio = req.body.aspectRatio || 'auto';
 
     if (!Number.isFinite(targetAge) || targetAge < 0 || targetAge > 120) {
       return res.status(400).json({ error: 'Target age must be between 0 and 120.' });
@@ -370,43 +391,34 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
     const spentToday = await getTodaySpend();
     if (spentToday + estimatedCost > DAILY_BUDGET_USD) {
       return res.status(429).json({
-        error: `Daily fal.ai budget of $${DAILY_BUDGET_USD.toFixed(2)} reached. ` +
+        error: `Daily budget of $${DAILY_BUDGET_USD.toFixed(2)} reached. ` +
           `Spent $${spentToday.toFixed(2)} today. Try again after midnight (Asia/Singapore).`,
       });
     }
 
-    // ---- resize + base64-encode photos as data URIs (keeps payload small, avoids needing fal storage upload) ----
-    const imageDataUris = await Promise.all(
+    // ---- stage uploaded photos at a public URL — kie.ai needs a real fetchable URL, not a data URI ----
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const imageUrls = await Promise.all(
       files.map(async (f) => {
-        const resized = await sharp(f.buffer)
+        const fileName = `${uuidv4()}.jpg`;
+        const destPath = path.join(UPLOADS_DIR, fileName);
+        await sharp(f.buffer)
           .rotate()
           .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 82 })
-          .toBuffer();
-        return `data:image/jpeg;base64,${resized.toString('base64')}`;
+          .toFile(destPath);
+        tempUploadPaths.push(destPath);
+        return `${origin}/uploads/${fileName}`;
       })
     );
 
     const prompt = buildPrompt({ targetAge, sceneDescription });
 
-    const submitted = await falSubmit({
-      prompt,
-      image_urls: imageDataUris,
-      num_images: 1,
-      image_size: ASPECT_TO_IMAGE_SIZE[aspectRatio] || 'auto',
-      quality: IMAGE_QUALITY,
-      output_format: 'png',
-    });
-
-    const result = await falPollResult(submitted.status_url, submitted.response_url);
-
-    const outputImage = result?.images?.[0];
-    if (!outputImage?.url) {
-      throw new Error('fal.ai response did not include an output image.');
-    }
+    const taskId = await kieCreateTask({ prompt, image_urls: imageUrls });
+    const resultImageUrl = await kiePollResult(taskId);
 
     const id = uuidv4();
-    const outputBuffer = await downloadToBuffer(outputImage.url);
+    const outputBuffer = await downloadToBuffer(resultImageUrl);
     const { previewFile } = await saveOriginalAndPreview(outputBuffer, id);
 
     const newTotal = await addSpend(estimatedCost);
@@ -433,6 +445,11 @@ app.post('/api/generate', upload.array('photos', 3), async (req, res) => {
   } catch (err) {
     console.error('generate error:', err);
     res.status(500).json({ error: err.message || 'Generation failed.' });
+  } finally {
+    // Reference photos only need to exist long enough for kie.ai to fetch them.
+    for (const p of tempUploadPaths) {
+      fsp.unlink(p).catch(() => {});
+    }
   }
 });
 
@@ -466,8 +483,8 @@ async function migrateLegacyImages() {
 
 app.listen(PORT, () => {
   console.log(`Age Transform app running at http://localhost:${PORT}`);
-  if (!FAL_KEY) {
-    console.warn('WARNING: FAL_KEY is not set. Copy .env.example to .env and add your fal.ai API key.');
+  if (!KIE_API_KEY) {
+    console.warn('WARNING: KIE_API_KEY is not set. Copy .env.example to .env and add your kie.ai API key.');
   }
   migrateLegacyImages().catch((err) => console.error('migration error:', err));
 });

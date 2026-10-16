@@ -1,12 +1,12 @@
 {
   "name": "age-transform-app",
   "version": "1.0.0",
-  "description": "Upload a photo, pick a target age, and generate an age-transformed portrait using fal.ai (Nano Banana edit model).",
+  "description": "Upload a photo, pick a target age, and generate an age-transformed portrait using kie.ai (GPT Image 2 edit model).",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node --use-system-ca server.js",
+    "dev": "node --use-system-ca server.js"
   },
   "license": "UNLICENSED",
   "private": true,

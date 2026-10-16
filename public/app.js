@@ -9,7 +9,6 @@ const els = {
   ageSlider: document.getElementById('age-slider'),
   ageReadout: document.getElementById('age-readout'),
   presets: document.querySelectorAll('#age-presets button'),
-  aspectRatio: document.getElementById('aspect-ratio'),
   generateBtn: document.getElementById('generate-btn'),
   generateBtnText: document.getElementById('generate-btn-text'),
   errorText: document.getElementById('error-text'),
@@ -248,7 +247,6 @@ els.generateBtn.addEventListener('click', async () => {
   photos.forEach((file) => formData.append('photos', file));
   formData.append('targetAge', String(targetAge));
   formData.append('sceneDescription', els.sceneDescription.value || '');
-  formData.append('aspectRatio', els.aspectRatio.value);
 
   setLoading(true);
   els.previewPlaceholder.classList.add('hidden');
