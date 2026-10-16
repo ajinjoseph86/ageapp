@@ -9,6 +9,7 @@ const fsp = fs.promises;
 const path = require('path');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const KIE_API_KEY = process.env.KIE_API_KEY;
 const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
