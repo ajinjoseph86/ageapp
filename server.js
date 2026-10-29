@@ -332,7 +332,12 @@ app.get('/api/budget', async (req, res) => {
 
 app.get('/api/history', async (req, res) => {
   const history = await readJson(HISTORY_FILE, []);
-  res.json(history.filter((entry) => entry.clientId === req.clientId));
+  // Shared gallery of watermarked previews. HD checkout/download stay limited to the creator.
+  res.json(
+    history.map(({ id, targetAge, resultUrl, createdAt, clientId }) => ({
+      id, targetAge, resultUrl, createdAt, mine: clientId === req.clientId,
+    }))
+  );
 });
 
 // ---------- paywall ----------
