@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
+const { applyAuth } = require('./auth');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -45,6 +46,8 @@ for (const dir of [DATA_DIR, GENERATED_DIR, PRIVATE_DIR, UPLOADS_DIR]) {
 }
 
 app.use(express.json());
+
+applyAuth(app, { password: process.env.APP_PASSWORD, secret: process.env.SESSION_SECRET });
 
 // ---------- per-visitor client id (so each browser only sees its own gallery) ----------
 
